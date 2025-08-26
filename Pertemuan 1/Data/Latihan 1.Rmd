@@ -1,6 +1,50 @@
+---
+title: "Untitled"
+output: html_document
+date: "2025-08-26"
+---
+
 ```{r}
-
-a = 2
-
+library("forecast")
+library("graphics")
+library("TTR")
+library("TSA")
 ```
+```{r}
+library("rio")
+
+df <- import("https://raw.githubusercontent.com/bryantddr/mpdw/main/Pertemuan%201/Data/store_sales.csv")
+```
+
+```{r}
+head(df)
+```
+
+```{r}
+dfs <- list()
+
+for(i in 1:10) {
+  dfs[[i]] <- df[df$store == i,]
+}
+```
+
+```{r}
+dfs[1]
+```
+
+
+```{r}
+dfs1.ts <- ts(dfs[[1]]$sales)
+
+summary(dfs1.ts)
+```
+
+```{r}
+ts.plot(dfs1.ts[1:100], xlab="Time Period ", ylab="Sales", 
+        main = "Time Series Plot of Sales")
+points(dfs1.ts)
+```
+
+
+
 
