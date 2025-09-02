@@ -1,0 +1,283 @@
+---
+title: "Smoothing"
+output: html_document
+date: "2025-09-02"
+---
+
+```{r}
+library(dplyr)
+library(lubridate)
+library(xts)
+library(forecast)
+library(graphics)
+library(TTR)
+library(TSA)
+library(ggplot2)
+```
+
+```{r}
+df <- read.csv("Pertemuan 2/Bitcoin.csv")
+df$Date <- mdy(df$Date)
+df <- df[379:504,]
+df
+```
+
+```{r}
+df2 <- df %>%
+  select(c("Date","Price"))%>%
+  mutate(
+    Price = gsub(pattern = ",", replacement = "", x = Price),
+    Price = as.numeric(Price),
+    Price = Price/1000)
+df2
+```
+
+```{r}
+df2_xts <- xts(df2$Price, order.by = df2$Date)
+plot(df2_xts, main = "BTC Price in a Thousand USD", xlab = "Date", ylab = "Price")
+```
+
+```{r}
+n <- nrow(df2)
+
+n_train <- floor(0.8 * n)
+
+training_ma <- df2[1:n_train, ]
+testing_ma  <- df2[(n_train+1):n, ]
+
+```
+
+```{r}
+plot(training_ma, type = "l", col="green",main="Plot data latih")
+```
+
+```{r}
+plot(testing_ma, type = "l", col="pink",main="Plot data latih")
+```
+
+```{r}
+ggplot() + 
+  geom_line(data = training_ma, aes(x = Date, y = Price, col = "Data Latih")) +
+  geom_line(data = testing_ma, aes(x = Date, y = Price, col = "Data Uji")) +
+  labs(x = "Date", y = "Price", color = "Legend") +
+   scale_colour_manual(name="Keterangan:", breaks = c("Data Latih", "Data Uji"),
+                      values = c("light green", "pink")) + 
+  theme_bw() + theme(legend.position = "bottom",
+                     plot.caption = element_text(hjust=0.5, size=12))
+```
+
+# Single Moving Average
+
+```{r}
+df_SMA <- SMA(training_ma$Price,n = 4)
+df_SMA
+```
+
+```{r}
+df_ramal <- c(NA, df_SMA)
+df_ramal
+```
+
+```{r}
+data_gab<-cbind(
+  date= c(df2$Date),
+  aktual=c(df2$Price),
+  pemulusan=c(df_SMA,rep(NA,26)),
+  ramalan=c(df_ramal,rep(df_ramal[length(df_ramal)],25)))
+
+data_gab
+```
+
+```{r}
+plot(df2, xlab="Date",type = "l", ylab="Price", main= "SMA N=4 BTC Price")
+points(df2)
+lines(data_gab[,c(1,3)],col="green",lwd=2)
+lines(data_gab[,c(1,4)],col="red",lwd=2)
+legend("topleft",c("data aktual","data pemulusan","data peramalan"), lty=8, col=c("black","green","red"), cex=0.5)
+```
+
+```{r}
+
+```
+
+```{r}
+error_train_sma = training_ma$Price-df_ramal[1:length(training_ma$Price)]
+
+SSE_train.sma = sum(error_train_sma[5:length(training_ma$Price)]^2)
+MSE_train.sma = mean(error_train_sma[5:length(training_ma$Price)]^2)
+MAPE_train.sma = mean(abs((error_train_sma[5:length(training_ma$Price)]/training_ma[5:length(training_ma),2])*100))
+
+akurasi_train.sma <- matrix(c(SSE_train.sma, MSE_train.sma, MAPE_train.sma))
+row.names(akurasi_train.sma)<- c("SSE", "MSE", "MAPE")
+colnames(akurasi_train.sma) <- c("Akurasi m = 4")
+akurasi_train.sma
+```
+
+```{r}
+error_test_sma = testing_ma$Price-data_gab[101:126,4]
+
+SSE_test.sma = sum(error_test_sma^2)
+MSE_test.sma = mean(error_test_sma^2)
+MAPE_test.sma = mean(abs((error_test_sma/testing_ma$Price*100)))
+
+akurasi_test.sma <- matrix(c(SSE_test.sma, MSE_test.sma, MAPE_test.sma))
+row.names(akurasi_test.sma)<- c("SSE", "MSE", "MAPE")
+colnames(akurasi_test.sma) <- c("Akurasi m = 4")
+akurasi_test.sma
+
+```
+
+```{r}
+error_test_sma
+```
+
+# Double Moving Average
+
+```{r}
+dma <- SMA(df_SMA, n = 4)
+At <- 2*df_SMA - dma
+Bt <- 2/(4-1)*(df_SMA - dma)
+data.dma<- At+Bt
+data.ramal2<- c(NA, data.dma)
+
+t = 1:26
+f = c()
+
+for (i in t) {
+  f[i] = At[length(At)] + Bt[length(Bt)]*(i)
+}
+
+data.gab2 <- cbind(date = c(df2$Date),
+                   aktual = c(df2$Price), 
+                   pemulusan1 = c(df_SMA,rep(NA,26)),
+                   pemulusan2 = c(dma, rep(NA,26)),
+                   At = c(At, rep(NA,26)), 
+                   Bt = c(Bt,rep(NA,26)),
+                   ramalan = c(data.ramal2, f[-1]))
+data.gab2
+```
+
+```{r}
+plot(df2, xlab="Date",type = "l", ylab="Price", main= "DMA N=4 BTC Price")
+points(df2)
+lines(data.gab2[,c(1,4)],col="green",lwd=2)
+lines(data.gab2[,c(1,7)],col="red",lwd=2)
+legend("topleft",c("data aktual","data pemulusan","data peramalan"), lty=8, col=c("black","green","red"), cex=0.8)
+```
+
+```{r}
+data.ramal2[1:length(training_ma$Price)]
+```
+
+```{r}
+data.ramal2
+```
+
+```{r}
+error_train_dma = training_ma$Price-data.gab2[1:100,7]
+
+SSE_train.dma = sum(error_train_dma[8:length(training_ma$Price)]^2)
+MSE_train.dma = mean(error_train_dma[8:length(training_ma$Price)]^2)
+MAPE_train.dma = mean(abs((error_train_dma[8:length(training_ma$Price)]/training_ma[8:length(training_ma$Price),2])*100))
+
+akurasi_train.dma <- matrix(c(SSE_train.dma, MSE_train.dma, MAPE_train.dma))
+row.names(akurasi_train.dma)<- c("SSE", "MSE", "MAPE")
+colnames(akurasi_train.dma) <- c("Akurasi m = 4")
+akurasi_train.dma
+```
+
+```{r}
+error_test_dma = testing_ma$Price-data.gab2[101:126,7]
+
+SSE_test.dma = sum(error_test_dma^2)
+MSE_test.dma = mean(error_test_dma^2)
+MAPE_test.dma = mean(abs((error_test_dma/testing_ma$Price*100)))
+
+akurasi_test.dma <- matrix(c(SSE_test.dma, MSE_test.dma, MAPE_test.dma))
+row.names(akurasi_test.dma)<- c("SSE", "MSE", "MAPE")
+colnames(akurasi_test.dma) <- c("Akurasi m = 4")
+akurasi_test.dma
+```
+
+# Single Exponential Smoothing
+
+```{r}
+ses.1 <- ses(training_ma$Price, h = 10, alpha = 0.2)
+plot(ses.1)
+```
+
+```{r}
+ses.1
+```
+
+```{r}
+ses.2<- ses(training_ma$Price, h = 10, alpha = 0.7)
+plot(ses.2)
+```
+
+```{r}
+autoplot(ses.1) +
+  autolayer(fitted(ses.1), series="Fitted") +
+  ylab("Price") + xlab("Period")
+```
+
+```{r}
+ses.1_holtwinters <- HoltWinters(training_ma$Price, gamma = FALSE, beta = FALSE, alpha = 0.2)
+plot(ses.1_holtwinters)
+```
+
+```{r}
+ramalan1<- forecast(ses.1_holtwinters, h=10)
+ramalan1
+```
+
+```{r}
+ses.2_holtwinters <- HoltWinters(training_ma$Price, gamma = FALSE, beta = FALSE, alpha = 0.7)
+plot(ses.2_holtwinters)
+```
+
+```{r}
+ramalan2<- forecast(ses.2_holtwinters, h=10)
+ramalan2
+```
+
+```{r}
+ses.opt <- ses(training_ma$Price, h = 10, alpha = NULL)
+plot(ses.opt)
+```
+
+```{r}
+HWopt<- HoltWinters(training_ma$Price, gamma = FALSE, beta = FALSE,alpha = NULL)
+HWopt
+```
+
+```{r}
+plot(HWopt)
+```
+
+```{r}
+ramalanopt<- forecast(HWopt, h=10)
+ramalanopt
+```
+
+```{r}
+SSE1<-ses.1_holtwinters$SSE
+MSE1<-ses.1_holtwinters$SSE/length(training_ma$Price)
+RMSE1<-sqrt(MSE1)
+
+akurasi1 <- matrix(c(SSE1,MSE1,RMSE1))
+row.names(akurasi1)<- c("SSE", "MSE", "RMSE")
+colnames(akurasi1) <- c("Akurasi lamda=0.2")
+akurasi1
+```
+
+```{r}
+SSE2<-ses.2_holtwinters$SSE
+MSE2<-ses.2_holtwinters$SSE/length(training_ma)
+RMSE2<-sqrt(MSE2)
+
+akurasi2 <- matrix(c(SSE2,MSE2,RMSE2))
+row.names(akurasi2)<- c("SSE", "MSE", "RMSE")
+colnames(akurasi2) <- c("Akurasi lamda=0.7")
+akurasi2
+```
