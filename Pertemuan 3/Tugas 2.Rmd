@@ -1,0 +1,263 @@
+---
+title: "Penanganan Autokorelasi - Tugas 2 MPDW"
+author: "Bryant"
+output: 
+  rmdformats::downcute:
+    downcute_theme: "chaos"
+    self_contained: true
+    code_download: true
+    toc_float: true
+    toc_depth: 3
+    df_print: paged
+    code_folding: show
+    theme: cerulean
+    highlight: "kate"
+---
+
+# Import Packages
+
+```{r,message=FALSE}
+library(dplyr)
+library(lmtest)
+library(lubridate)
+library(prais)
+```
+
+# Import Data & Praproses Data
+
+```{r}
+IPM <- read.csv("D:\\Kuliah\\Sem 5\\MPDW\\Pertemuan 2\\ipm_sulawesi_selatan_time_series_updated.csv") 
+IPM <- IPM %>%
+  rename(Tahun = Wilayah)
+  
+IPM
+
+```
+
+Import data IPM per provinsi tahun 2010-2021
+
+```{r}
+IPM_Makassar <- IPM %>%
+  select(c("Makassar","Tahun"))%>%
+  rename(IPM = Makassar)
+IPM_Makassar.ts <- ts(IPM_Makassar)
+IPM_Makassar.ts
+```
+
+Mengambil kolom IPM Kota Makassar dan mengubahnya menjadi data time series
+
+# Ekplorasi Data
+
+```{r}
+ts.plot(IPM_Makassar.ts, ylab = "IPM", xlab = "Periode", main = "Time Series Plot of IPM in Makassar")
+points(IPM_Makassar.ts)
+```
+
+Berdasarkan plot di atas, adanya tren naik pada IPM Makassar
+
+Karena tujuan awal akan menggunakan Regresi Linear Sederhana, tidak akan dilakukan pemulusan pada data dikarenakan pemulusan bisa mengubah informasi dari data asli.
+
+# Regresi
+
+## Model Awal
+
+```{r}
+model <- lm(IPM ~ Tahun, data = IPM_Makassar)
+summary(model)
+```
+
+Berdasarkan ringkasan model di atas didapatkan model $$
+  y_i = -915.823 + 0.494x_i
+$$\
+didapatkan $$R^2$$ sebesar 0.989 yang berarti keragaman nilai IPM dapat dijelaskan oleh peubah tahun. Hal ini memperlihatkan model tersebut adalah model terbaik. Namun, kita perlu menguji sisaan pada model.
+
+### Uji Sisaan
+
+#### Ekplorasi Data
+
+```{r}
+#sisaan dan fitted value
+sisaan<- residuals(model)
+fitValue<- predict(model)
+
+#Diagnostik dengan eksploratif
+par(mfrow = c(2,2))
+qqnorm(sisaan)
+qqline(sisaan, col = "steelblue", lwd = 2)
+plot(fitValue, sisaan, col = "steelblue", pch = 20, xlab = "Residual", ylab = "Fitted Values", main = "Residual vs Fitted Values")
+abline(a = 0, b = 0, lwd = 2)
+hist(sisaan, col = "steelblue", nclass = 8, main = "Histogram of Residuals")
+plot(seq(1,12,1), sisaan, col = "steelblue", pch = 20, xlab = "Residual", ylab = "Order", main = "Residual vs Order")
+lines(seq(1,12,1), sisaan, col = "red")
+abline(a = 0, b = 0, lwd = 2)
+```
+
+Berdasarkan QQ Plot sebaran sisaan cenderung mengikuti garis yang berarti sebarannya normal. Pada Histogram pun memperlihatkan sisaan cenderung normal, walau tak sempurna.
+
+Berdasarkan plot Residual vs Fitted dan Residual vs Order menunjukkan adanya pola yang mengindikasikan adanya autokorelasi.
+
+```{r}
+par(mfrow = c(1,2))
+acf(sisaan)
+pacf(sisaan)
+```
+
+Berdasarkan plot ACF dan PACF tidak ada lag yang signifikan.
+
+### Uji Formal
+
+Selanjutnya dilakukan uji formal untuk menguji normalitas dan autokorelasi.
+
+### Normalitas
+
+H0: sisaan mengikuti sebaran normal\
+H1: sisaan tidak mengikuti sebaran normal
+
+```{r}
+shapiro.test(sisaan)
+```
+
+Berdasarkan uji formal Shapiro Wilk, p-value = 0.844 \> 0.05 = $$\alpha$$\
+Cukup bukti untuk menyatakan sisaan menyebar normal
+
+#### Autokorelasi
+
+H0: tidak ada autokorelasi\
+H1: ada autokorelasi
+
+```{r}
+dwtest(model)
+```
+
+Berdasarkan uji formal Durbin Watson p-value = 0.018 \< 0.05 = $$\alpha$$\
+Cukup bukti untuk menyatakan bahwa ada autokorelasi
+
+Oleh karena itu, diperlukan untuk penanganan terhadap autokorelasi.
+
+## Penanganan Autokorelasi
+
+### Metode Hildreth Lu
+
+```{r}
+hildreth.lu.func<- function(r, model){
+  x <- model.matrix(model)[,-1]
+  y <- model.response(model.frame(model))
+  n <- length(y)
+  t <- 2:n
+  y <- y[t]-r*y[t-1]
+  x <- x[t]-r*x[t-1]
+  
+  return(lm(y~x))
+}
+```
+
+```{r}
+r <- c(seq(0.1,0.9, by= 0.1))
+tab <- data.frame("rho" = r, "SSE" = sapply(r, function(i){deviance(hildreth.lu.func(i, model))}))
+round(tab, 4)
+```
+
+```{r}
+r <- c(seq(0.3,0.5, by= 0.01))
+tab <- data.frame("rho" = r, "SSE" = sapply(r, function(i){deviance(hildreth.lu.func(i, model))}))
+round(tab, 4)
+```
+
+```{r}
+r <- c(seq(0.41,0.42, by= 0.001))
+tab <- data.frame("rho" = r, "SSE" = sapply(r, function(i){deviance(hildreth.lu.func(i, model))}))
+round(tab, 4)
+```
+
+$\rho$ dengan SSE terkecil didapatkan 0.41
+
+```{r}
+modelHL <- hildreth.lu.func(0.41, model)
+summary(modelHL)
+```
+
+```{r}
+cat("y = ", coef(modelHL)[1]/(1-0.341), "+", coef(modelHL)[2],"x", sep = "")
+```
+
+Setelah ditransformasi didapatkan persamaan berikut
+
+$$
+  y_i = -820.3521 + 0.4944099x_i
+$$
+
+```{r}
+dwtest(modelHL)
+```
+
+Hasil uji Durbin-Watson juga menunjukkan bawah nilai DW sebesar $1.2827$ berada pada selang daerah inkonklusif, yaitu pada rentang DL \< DW \< DU atau $0.971 < DW < 1.331$. Namun, berdasarkan *p-value* \< 0.05 menunjukkan bahwa ada autokorelasi. Oleh karena itu, metode Hildreth Lu belum cukup untuk menangani autokorelasi pada model ini.
+
+### Metode Cochrane Orcutt
+
+```{r}
+rho <- 0.410
+
+ipm.trans<- IPM_Makassar[-1,1]-IPM_Makassar[-12,1]*rho
+tahun.trans<- IPM_Makassar[-1,2]-IPM_Makassar[-12,2]*rho
+
+modelCO<- lm(ipm.trans~tahun.trans)
+summary(modelCO)
+```
+
+```{r}
+b0bintang <- modelCO$coefficients[-2]
+b0 <- b0bintang/(1-rho)
+b1 <- modelCO$coefficients[-1]
+b0
+```
+
+```{r}
+b1
+```
+
+Hasil keluaran model didapatkan persamaan $$y_i=-912.5875+0.4926x_t$$
+
+```{r}
+dwtest(modelCO)
+```
+
+Hasil uji Durbin-Watson juga menunjukkan bawah nilai DW sebesar $1.2827$ berada pada selang daerah inkonklusif, yaitu pada rentang DL \< DW \< DU atau $0.971 < DW < 1.331$. Namun, berdasarkan *p-value* \< 0.05 menunjukkan bahwa ada autokorelasi. Oleh karena itu, metode Cochrane Orcutt juga belum cukup untuk menangani autokorelasi pada model ini.
+
+### Metode Prais Winsten
+
+Selanjutnya dilakukan metode Prais Winsten, karena kedua metode tersebut belum dapat menangani masalah autokorelasi.
+
+```{r}
+modelPW <- prais_winsten(IPM~Tahun, data = IPM_Makassar, index = "Tahun") 
+summary(modelPW) 
+```
+
+Berdasarkan uji Durbin Watson menunjukkan bahwa nilai DW meningkat menjadi $1.632$. Nilai DW sudah berada pada rentang DU \< DW \< 4-DU atau $1.331 < DW < 2.669$. Maka, sudah tidak ada autokorelasi. Metode Prais Winsten dapat menangani autokorelasi dengan baik pada model ini.
+
+## Perbandingan Metode Terbaik
+
+Metode terbaik dipilih berdasarkan SSE terendah
+
+```{r}
+sseModelawal <- anova(model)$`Sum Sq`[-1]
+sseModelPW <- sum(residuals(modelPW)^2)
+sseModelCO <- anova(modelCO)$`Sum Sq`[-1]
+sseModelHL <- anova(modelHL)$`Sum Sq`[-1]
+mseModelawal <- sseModelawal/length(IPM_Makassar[,1])
+mseModelPW <- sseModelPW/length(IPM_Makassar[,1])
+mseModelCO <- sseModelCO/length(IPM_Makassar[,1])
+mseModelHL <- sseModelHL/length(IPM_Makassar[,1])
+akurasi <- matrix(c(sseModelawal,sseModelPW,sseModelCO,sseModelHL,
+                    mseModelawal,mseModelPW,mseModelCO,mseModelHL),nrow=2,ncol=4,byrow = T)
+colnames(akurasi) <- c("Model Awal","Model Prais Winsten", "Model Cochrane-Orcutt", "Model Hildreth-Lu")
+row.names(akurasi) <- c("SSE","MSE")
+akurasi
+```
+
+Berdasarkan hasil tersebut diketahui bahwa hasil penanganan autokorelasi dengan metode Hildreth Lu dan metode Cochrane Orcutt menghasilkan SSE yang sama, sebesar $0.3120$. Kedua metode tersebut memiliki nilai SSE terendah, tetapi belum bisa menangani autokorelasi. Maka, metode yang kita gunakan adalah metode Prais Winsten dengan SSE bernilai $0.4012$.
+
+# Simpulan
+
+Autokorelasi seringkali muncul pada data Indeks Pembangunan Manusia (IPM) akibat korelasi yang kuat antar komponennya, khususnya indikator ekonomi. Kehadiran autokorelasi ini dapat mengganggu validitas model regresi, membuatnya menjadi kurang bisa diandalkan.
+
+Masalah ini dapat dideteksi melalui analisis visual seperti plot sisaan, ACF, dan PACF, atau melalui uji formal seperti Durbin-Watson. Untuk menanganinya, dapat digunakan beberapa metode seperti Hildreth-Lu, Cochrane-Orcutt, dan Prais-Winsten. Meskipun, nilai SSE dengan metode Prais-Winsten paling besar, metode ini dapat mengatasi autokorelasi dengan baik pada model ini.
