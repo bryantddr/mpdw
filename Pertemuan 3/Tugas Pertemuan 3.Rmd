@@ -1,0 +1,261 @@
+---
+title: "Pertemuan 3"
+date: "2025-09-18"
+output: 
+  rmdformats::downcute:
+    downcute_theme: "chaos"
+    self_contained: true
+    code_download: true
+    toc_float: true
+    toc_depth: 3
+    df_print: paged
+    code_folding: show
+    theme: cerulean
+    highlight: "kate"
+---
+
+# Import Packages
+
+```{r, warning=FALSE, error=FALSE}
+library(dLagM)
+library(dynlm)
+library(MLmetrics)
+library(lmtest)
+library(car)
+library(dplyr)
+```
+
+# Import Dataset
+
+```{r}
+df <- read.csv("NewDelhi_Air_quality.csv")
+df
+```
+# Pre-processing Data
+
+Mengambil AQI sebagai Yt (variabel dependen) dan no2 sebagai Xt (variabel independen)
+Menambah Peubah Lag
+
+```{r}
+df <- df %>% 
+  select(c(AQI,no2)) %>%
+  rename(Yt  = AQI,
+         Xt = no2) %>%
+  mutate(Yt_1 = lag(Yt)) %>%
+  select(Yt,Yt_1,Xt)
+df
+```
+# Splitting Data
+
+Splitting data dengan rasio 80:20 
+
+```{r}
+n <- nrow(df)
+
+train <- df[1:floor(0.8*n),]
+test <- df[(floor(0.8*n) + 1):n,]
+train
+test
+
+```
+Mengubah data menjadi data time series
+
+```{r}
+train.ts <- ts(train)
+test.ts <- ts(test)
+df.ts <- ts(df)
+```
+
+# Model Koyck
+
+```{r}
+model.koyck <- koyckDlm(x = train$Xt, y = train$Yt)
+summary(model.koyck)
+```
+
+```{r}
+AIC(model.koyck)
+```
+
+```{r}
+BIC(model.koyck)
+```
+Dari hasil berikut, didapat bahwa peubah $x_t$ dan $y_t{-1}$ memiliki nilai p-value = 2.2 $\times$ $10^{-16}$ berpengaruh signifikan terhadap $y$. Didapat pula model sebagai berikut
+
+$$
+\hat{Y}_t = 2.4673 + 27.8681X_t + 0.8598Y_{t-1}
+$$
+
+## Peramalan dan Akurasi
+
+```{r}
+fore.koyck <- forecast(model.koyck, x=test$Xt, h=15)
+fore.koyck
+```
+
+```{r}
+mape.koyck <- MAPE(fore.koyck$forecasts, test$Yt)
+mape.koyck
+```
+
+```{r}
+GoF(model.koyck)
+```
+
+# Model Regression with Distributed Lag
+
+## Model Awal (Lag = 1)
+
+```{r}
+model.dlm <- dlm(x = train$Xt,y = train$Yt , q = 1 )
+summary(model.dlm)
+```
+
+Dari hasil diatas, didapat bahwa $P-value$ dari intercept dan $x_{t-1}<0.05$. Hal ini menunjukkan bahwa intercept dan $x_{t-1}$ berpengaruh signifikan terhadap $y$. Adapun model keseluruhan yang terbentuk adalah sebagai berikut
+
+$$
+\hat{Y_t}= 21.879-16.307X_t+132.953X_{t-1}
+$$
+## Peramalan dan Akurasi
+
+```{r}
+fore.dlm <- forecast(model = model.dlm, x=test$Xt, h=15)
+fore.dlm
+```
+```{r}
+mape.dlm <- MAPE(fore.dlm$forecasts, test$Yt)
+mape.dlm
+```
+```{r}
+#akurasi data training
+GoF(model.dlm)
+```
+
+
+## Lag Optimum
+
+```{r}
+finiteDLMauto(formula = Yt ~ Xt,
+              data = data.frame(train), q.min = 1, q.max = 5,
+              model.type = "dlm", error.type = "AIC", trace = TRUE)
+```
+
+max q yang digunakan 5, karena data yang terlalu dikit hal ini bisa membuat banyaknya data akan hilang ketika meningkatkan lagnya. 
+
+Berdasarkan hasil tersebut, akan digunakan q = 4 karena memiliki AIC Terendah
+
+```{r}
+model.dlm4 <- dlm(x = train$Xt,y = train$Yt , q = 4 )
+summary(model.dlm)
+```
+
+Dari hasil diatas, didapat bahwa $P-value$ dari intercept dan $x_{t-1}<0.05$. Hal ini menunjukkan bahwa intercept dan $x_{t-1}$ berpengaruh signifikan terhadap $y$. Adapun model keseluruhan yang terbentuk adalah sebagai berikut
+
+$$
+\hat{Y_t}= 19.059152.393X_t-180.793X_{t-1}+241.823X_{t-2}-201.513X_{t-3}+168.294X_{t-4}
+$$
+
+## Peramalan dan Akurasi
+
+```{r}
+fore.dlm4 <- forecast(model.dlm4, x=test$Xt, h=15)
+fore.dlm4
+```
+
+```{r}
+mape.dlm4 <- MAPE(fore.dlm4$forecasts, test$Yt)
+mape.dlm4
+```
+
+```{r}
+#akurasi data training
+GoF(model.dlm4)
+```
+
+# Model Autoregressive
+
+## Model Awal
+
+```{r}
+model.ardl <- ardlDlm(formula = Yt~Xt, data = train, p = 1 , q = 1)
+summary(model.ardl)
+```
+```{r}
+AIC(model.ardl)
+```
+
+```{r}
+BIC(model.ardl)
+```
+
+```{r}
+fore.ardl <- forecast(model.ardl, x=test$Xt, h=15)
+fore.ardl
+```
+
+```{r}
+mape.ardl <- MAPE(fore.ardl$forecasts, test$Yt)
+mape.ardl
+```
+
+```{r}
+GoF(model.ardl)
+```
+
+## Lag Optimum
+
+```{r}
+model.ardl.opt <- ardlBoundOrders(data = df, ic = "AIC", 
+                                  formula = Yt ~ Xt )
+model.ardl.opt
+```
+```{r}
+min_p=c()
+for(i in 1:6){
+  min_p[i]=min(model.ardl.opt$Stat.table[[i]])
+}
+q_opt=which(min_p==min(min_p, na.rm = TRUE))
+p_opt=which(model.ardl.opt$Stat.table[[q_opt]] == 
+              min(model.ardl.opt$Stat.table[[q_opt]], na.rm = TRUE))
+data.frame("q_optimum" = q_opt, "p_optimum" = p_opt, 
+           "AIC"=model.ardl.opt$min.Stat)
+```
+```{r}
+model.ard2 <- ardlDlm(formula = Yt~Xt, data = train, p = 14 , q = 6)
+summary(model.ardl)
+```
+
+```{r}
+AIC(model.ard2)
+```
+
+```{r}
+BIC(model.ard2)
+```
+
+```{r}
+fore.ard2 <- forecast(model.ard2, x=test$Xt, h=15)
+fore.ard2
+```
+
+```{r}
+mape.ard2 <- MAPE(fore.ard2$forecasts, test$Yt)
+mape.ard2
+```
+
+```{r}
+GoF(model.ard2)
+```
+
+# Perbandingan Model
+
+```{r}
+akurasi <- matrix(c(mape.koyck, mape.dlm, mape.dlm4, mape.ardl,mape.ard2))
+row.names(akurasi)<- c("Koyck","DLM 1","DLM 2","Autoregressive 1", "Autoregressive 2")
+colnames(akurasi) <- c("MAPE")
+akurasi
+```
+Berdasarkan nilai MAPE, model paling optimum didapat pada Model Koyck dengan MAPE terendah
+
+
+

@@ -16,7 +16,7 @@ library(ggplot2)
 ```
 
 ```{r}
-df <- read.csv("Pertemuan 2/Bitcoin.csv")
+df <- read.csv("Bitcoin.csv")
 df$Date <- mdy(df$Date)
 df <- df[379:504,]
 df
