@@ -1,0 +1,259 @@
+---
+title: "Penanganan Ketidakstasioneran - Tugas Praktikum 6"
+author: "Bryant Indervil Deadora G1401231062"
+output:
+  rmdformats::downcute:
+    downcute_theme: chaos
+    self_contained: true
+    code_download: true
+    toc_float: true
+    toc_depth: 4
+    df_print: paged
+    code_folding: show
+    theme: cerulean
+    highlight: kate
+---
+
+# Import Packages
+
+```{r, warning=FALSE, message=FALSE}
+library(rio)
+library(ggplot2)
+library(tsibble)
+library(tseries)
+library(MASS)
+library(tidyverse)
+```
+
+# Praproses Data
+
+```{r}
+df <- import("https://raw.githubusercontent.com/bryantddr/mpdw/refs/heads/main/Pertemuan%202/Bitcoin.csv")
+df <- df %>%
+  mutate(
+    Price = gsub(pattern = ",", replacement = "", x = Price),
+    Price = as.numeric(Price),
+    Price = Price/1000)
+df <- df[379:504,2]
+df
+```
+
+```{r}
+ts.df <- ts(df)
+ts.df
+```
+
+# Ekplorasi Data
+
+## Plot Time Series
+
+```{r}
+plot_df <- ts.df |> as_tsibble() |> 
+  ggplot(aes(x = index, y = value)) + geom_line() + theme_bw() +
+  xlab("Obs") + ylab("Price")
+plot_df
+```
+
+```{r}
+mean(ts.df)
+```
+
+```{r}
+lattice::densityplot(as.vector(ts.df))
+```
+
+Berdasarkan plot, terlihat data tidak stasioner dalam rataan maupun ragam, ditandai data tidak menyebar di sekitar nilai tengahnya, cenderung adanya tren.
+
+Dalam data ekonomi termasuk Bitcoin, hal ini hampir pasti terjadi. Oleh karena itu, akan dilakukan pengananan lebih lanjut.
+
+## Plot ACF
+
+```{r}
+acf(ts.df)
+```
+
+Berdasarkan plot ACF, terdapat autokorelasi positif dan tidak stationer.
+
+## Uji PP
+
+```{r}
+pp.test(ts.df)
+```
+
+$H_0$ : Data tidak stasioner dalam rataan $H_1$ : Data stasioner dalam rataan
+
+Berdasarkan hasil uji ADF, *p-value* = 0.1131 \> 0.05 = $\alpha$, maka tak tolak $H_0$. Data tidak stasioner dalam rataan
+
+## Uji Box-Cox
+
+```{r}
+index <- seq(1:126)
+
+# Uji Box-Cox
+bc <- boxcox(
+  ts.df  ~ index,
+  lambda = seq(0, 5, by = 0.001)
+)
+```
+
+```{r}
+lambda <- bc$x[which.max(bc$y)]
+lambda
+```
+
+```{r}
+# Selang kepercayaan 95% untuk lambda
+ci_lambda <- bc$x[bc$y > max(bc$y) - 0.5 * qchisq(0.95, 1)]
+
+# Batas bawah dan batas atas
+ci_lower <- min(ci_lambda)
+ci_upper <- max(ci_lambda)
+
+c(Batas_Bawah = ci_lower, Batas_Atas = ci_upper)
+```
+
+Hasil uji Box-Cox menunjukkan bahwa nilai $\lambda$ optimum adalah 0.518 dengan interval kepercayaan 95% (0.306,0.729). Selang tidak mengandung 1, maka data tidak stasioner dalam ragam.
+
+# Penanganan Ketidakstasioneran
+
+## Hanya Differencing
+
+### Differencing
+
+```{r}
+ts.df_diff1 <- diff(ts.df, differences = 1)
+```
+
+### Plot Time Series
+
+```{r}
+plot_df_diff1 <- ts.df_diff1 |> as_tsibble() |> 
+  ggplot(aes(x = index, y = value)) + geom_line() + theme_bw() +
+  xlab("Obs") + ylab("Price")
+plot_df_diff1
+```
+
+Berdasarkan plot, data terlihat menyebar pada rataan yang berarti stasioner pada rataan. Namun, sekilas terlihat belum stasioner pada ragam.
+
+### Plot ACF
+
+```{r}
+acf(ts.df_diff1)
+```
+
+Berdasarkan Plot ACF, terlihat sudah stasioner dalam rataan. Hasil ini sama dengan time series plot.
+
+### Uji PP
+
+```{r,warning=FALSE}
+pp.test(ts.df_diff1)
+```
+
+Berdasarkan uji PP, *p-value* = 0.01 < 0.05 = $\alpha$, tolak H0. Data sudah stasioner pada rataan, sesuai dengan hasil dari *time series plot* dan plot ACF
+
+### Uji Box-Cox
+
+```{r}
+index <- seq(1:125)
+
+# Uji Box-Cox
+bc <- boxcox(
+  ts.df_diff1 - min(ts.df_diff1) + 1  ~ index,
+  lambda = seq(0, 5, by = 0.001)
+)
+```
+
+
+```{r}
+# Selang kepercayaan 95% untuk lambda
+ci_lambda <- bc$x[bc$y > max(bc$y) - 0.5 * qchisq(0.95, 1)]
+
+# Batas bawah dan batas atas
+ci_lower <- min(ci_lambda)
+ci_upper <- max(ci_lambda)
+
+c(Batas_Bawah = ci_lower, Batas_Atas = ci_upper)
+```
+
+Berdasarkan Uji Box-Cox, interval kepercayaan 95% $\lambda$ sebesar (0.440,1.038). Dalam selang ini terdapat nilai $\lambda$ = 1, namun selang tersebut terlalu mendekati nilai 1 yaitu 1.038. Bisa terjadi kekeliruan, oleh karena itu akan dilakukan transformasi Box-Cox terlebih dahulu sebelum *Differencing*.
+
+## Transformasi Box-Cox -> *Differencing*
+
+### Transformasi Box-Cox
+
+Berdasarkan Uji Box-Cox pada eksplorasi data didapatkan nilai $\lambda$ optimum sebesar 0.518, maka data akan dipangkatkan $\frac{1}{2}$
+
+```{r}
+ts.df_bc <- ts.df^0.5
+```
+
+### Differencing
+
+```{r}
+ts.df_bc_diff1 <- diff(ts.df_bc, differences = 1)
+```
+
+### Plot Time Series
+
+```{r}
+plot_df_bc_diff1 <- ts.df_bc_diff1 |> as_tsibble() |> 
+  ggplot(aes(x = index, y = value)) + geom_line() + theme_bw() +
+  xlab("Obs") + ylab("Price")
+plot_df_bc_diff1
+```
+
+Berdasarkan plot, data terlihat menyebar pada rataan yang berarti stasioner pada rataan dan sekilas stasioner pada ragam.
+
+### Plot ACF
+
+```{r}
+acf(ts.df_bc_diff1)
+```
+
+Berdasarkan Plot ACF, terlihat sudah stasioner dalam rataan. Hasil ini sama dengan time series plot.
+
+### Uji PP
+
+```{r,warning=FALSE}
+pp.test(ts.df_bc_diff1)
+```
+
+Berdasarkan uji PP, *p-value* = 0.01 < 0.05 = $\alpha$, tolak H0. Data sudah stasioner pada rataan, sesuai dengan hasil dari *time series plot* dan plot ACF
+
+### Uji Box-Cox
+
+```{r}
+lambda <- bc$x[which.max(bc$y)]
+lambda
+```
+
+
+```{r}
+index <- seq(1:125)
+
+# Uji Box-Cox
+bc <- boxcox(
+  ts.df_bc_diff1 - min(ts.df_bc_diff1) + 1  ~ index,
+  lambda = seq(0, 5, by = 0.001)
+)
+```
+
+
+```{r}
+# Selang kepercayaan 95% untuk lambda
+ci_lambda <- bc$x[bc$y > max(bc$y) - 0.5 * qchisq(0.95, 1)]
+
+# Batas bawah dan batas atas
+ci_lower <- min(ci_lambda)
+ci_upper <- max(ci_lambda)
+
+c(Batas_Bawah = ci_lower, 
+  Batas_Atas = ci_upper)
+```
+
+Berdasarkan Uji Box-Cox, interval kepercayaan 95% $\lambda$ sebesar (0,0.869). Dalam selang ini tidak terdapat nilai $\lambda$ = 1, yang justru tidak stasioner pada ragam. Hasil ini tidak sesuai dengan time series plot. Oleh karena itu Differencing saja sudah cukup.
+
+
+# Kesimpulan
+
+>Setelah dilakukan penanganan ketidakstasioneran dengan 2 pendekatan yaitu "Hanya *Differencing*" dan "Transformasi Box-Cox -> *Differencing*". Pendekatan pertama terlihat tidak stasioner pada ragam jika dilihat sekilas dengan time series plot, namun stasioner pada ragam ketika dicek lebih lanjut dengan uji Box-Cox. Pendekatan kedua sekilas stasioner berdasarkan time series plot, namun setelah dicek dengan uji Box-Cox tidak stasioner pada ragam. Oleh karena itu, pendekatan yang digunakan dan akan dilanjutkan untuk *modelling* adalah data dengan *Differencing* tanpa transformasi Box-Cox
