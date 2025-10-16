@@ -1,0 +1,400 @@
+---
+title: "Forecasting Permintaan Harian 'Flores Fajar Blend' - UTS Praktikum MPDW"
+author: "Bryant Indervil Deadora G1401231062"
+output:
+  rmdformats::downcute:
+    downcute_theme: chaos
+    self_contained: true
+    code_download: true
+    toc_float: true
+    toc_depth: 4
+    df_print: paged
+    code_folding: show
+    theme: cerulean
+    highlight: kate
+---
+
+```{r,warning=FALSE,message=FALSE}
+library(rio)
+library(tidyverse)
+library(ggplot2)
+library(tsibble)
+library(tseries)
+library(MASS)
+library(forecast)
+library(TSA)
+```
+
+
+```{r}
+dt <- import("https://raw.githubusercontent.com/bryantddr/mpdw/refs/heads/main/data_penjualan_ujian.csv")
+dt <- dt %>% 
+  mutate(Penjualan = Penjualan + 62)
+dt <- dt$Penjualan
+ts.dt <- ts(dt)
+ts.dt
+```
+
+# Splitting Data
+
+```{r}
+dt.train <- dt[1:floor(0.8*length(dt))]
+dt.test <- dt[(floor(0.8*length(dt))+1): length(dt)]
+```
+
+```{r}
+ts.dt.train <- ts(dt.train)
+ts.dt.test <- ts(dt.test)
+```
+
+# Ekplorasi Data
+
+## Plot Time Series
+
+```{r}
+plot_dt <- ts.dt.train |> as_tsibble() |> 
+  ggplot(aes(x = index, y = value)) + geom_line() + theme_bw() +
+  xlab("Obs") + ylab("Price")
+plot_dt
+```
+
+```{r}
+mean(ts.dt.train)
+```
+
+```{r}
+lattice::densityplot(as.vector(ts.dt.train))
+```
+
+Berdasarkan plot, terlihat data tidak stasioner dalam rataan, ditandai data tidak menyebar di sekitar nilai tengahnya, cenderung adanya tren. Namun, cenderung stasioner dalam ragam, ditandai dengan lebar fluktuasi yang mirip.
+
+## Plot ACF
+
+```{r}
+acf(ts.dt.train)
+```
+
+Berdasarkan plot ACF, terlihat plot tails off slowly. Hal ini mengindikasikan terdapat tidak stationer dalam rataan. Hal ini sesuai dengan ekplorasi time series plot.
+
+## Uji ADF
+
+```{r}
+adf.test(ts.dt.train)
+```
+
+$H_0$ : Data tidak stasioner dalam rataan 
+$H_1$ : Data stasioner dalam rataan
+
+Berdasarkan hasil uji ADF, *p-value* = 0.9325 > 0.05 = $\alpha$, maka tak tolak $H_0$. Data tidak stasioner dalam rataan. Hal ini sesuai dengan *time series* dan ACF plot.
+
+Dalam data penjualan, hal ini hampir pasti terjadi. Oleh karena itu, akan dilakukan pengananan lebih lanjut.
+
+## Uji Box-Cox
+
+```{r}
+index <- seq(1:length(ts.dt.train))
+
+# Uji Box-Cox
+bc <- boxcox(
+  ts.dt.train  ~ index,
+  lambda = seq(0, 5, by = 0.001)
+)
+```
+
+```{r}
+lambda <- bc$x[which.max(bc$y)]
+lambda
+```
+
+```{r}
+# Selang kepercayaan 95% untuk lambda
+ci_lambda <- bc$x[bc$y > max(bc$y) - 0.5 * qchisq(0.95, 1)]
+
+# Batas bawah dan batas atas
+ci_lower <- min(ci_lambda)
+ci_upper <- max(ci_lambda)
+
+c(Batas_Bawah = ci_lower, Batas_Atas = ci_upper)
+```
+
+Hasil uji Box-Cox menunjukkan bahwa nilai $\lambda$ optimum adalah 0 dengan interval kepercayaan 95% (0,0.097). Selang tidak mengandung $\lambda$ = 1, maka data tidak stasioner dalam ragam. Perlu penanganan lebih lanjut dengan melakukan transformasi Box-Cox
+
+
+# Penanganan Ketidakstasioneran Data
+
+## Differencing
+
+```{r}
+ts.dt.train_diff1 <- diff(ts.dt.train, differences = 1)
+```
+
+## Plot Time Series
+
+```{r}
+plot_dt.train_diff1 <- ts.dt.train_diff1 |> as_tsibble() |> 
+  ggplot(aes(x = index, y = value)) + geom_line() + theme_bw() +
+  xlab("Obs") + ylab("Price")
+plot_dt.train_diff1
+```
+
+Berdasarkan plot, data terlihat menyebar pada rataan yang berarti stasioner pada rataan. Namun, sekilas terlihat belum stasioner pada ragam.
+
+## Plot ACF
+
+```{r}
+acf(ts.dt.train_diff1)
+```
+
+Berdasarkan Plot ACF, terlihat sudah stasioner dalam rataan, ditandai dengan plot ACF cuts off pada lag 1. Hasil ini sama dengan time series plot.
+
+## Uji ADF
+
+```{r,warning=FALSE}
+adf.test(ts.dt.train_diff1)
+```
+
+$H_0$ : Data tidak stasioner dalam rataan 
+$H_1$ : Data stasioner dalam rataan
+
+Berdasarkan uji ADF, *p-value* = 0.035 < 0.05 = $\alpha$, tolak H0. Data sudah stasioner pada rataan, sesuai dengan hasil dari *time series plot* dan plot ACF
+
+## Uji Box-Cox
+
+```{r}
+index <- seq(1:(length(ts.dt.train)-1))
+
+# Uji Box-Cox
+bc <- boxcox(
+  ts.dt.train_diff1 - min(ts.dt.train_diff1) + 1  ~ index,
+  lambda = seq(0, 5, by = 0.001)
+)
+```
+
+
+```{r}
+# Selang kepercayaan 95% untuk lambda
+ci_lambda <- bc$x[bc$y > max(bc$y) - 0.5 * qchisq(0.95, 1)]
+
+# Batas bawah dan batas atas
+ci_lower <- min(ci_lambda)
+ci_upper <- max(ci_lambda)
+
+c(Batas_Bawah = ci_lower, Batas_Atas = ci_upper)
+```
+
+Berdasarkan Uji Box-Cox, interval kepercayaan 95% $\lambda$ sebesar (0.852,1.285). Dalam selang ini terdapat nilai $\lambda$ = 1, maka data sudah stasioner dalam ragam. Tanpa melakukan transformasi Box-Cox, data sudah stasioner dalam ragam. Oleh karena itu, tidak perlu dilakukan transformasi.
+
+
+# Identifikasi Model
+
+```{r}
+acf(ts.dt.train_diff1)
+```
+
+Berdasarkan Plot ACF, terlihat plot ACF cuts off pada lag 1, jika asumsi plot PACF tails off model yang baik digunakan adalah MA(1)
+
+```{r}
+pacf(ts.dt.train_diff1)
+```
+
+Berdasarkan plot PACF, terlihat plot PACF tails off. Hal ini meyakinkan bahwa model yang akan digunakan adalah MA(1)
+
+```{r}
+eacf(ts.dt.train_diff1)
+```
+
+Berdasarkan plot EACF, segitiga bawah teratas adalah model ARMA(0,1) atau sama saja dengan MA(1)
+
+# Pemodelan
+
+Berdasarkan ACF, PACF, EACF plot, model yang akan digunakan adalah model MA(1)
+
+```{r}
+model1.da=Arima(ts.dt.train_diff1, order=c(0,0,1))
+summary(model1.da)
+```
+
+```{r}
+lmtest::coeftest(model1.da)
+```
+Berdasarkan hasil z test, didapatkan *p-value* = $2 \times 10^{-16}$ < 0.05 = $\alpha$, maka tolak $H_0$.
+
+Koefisien ma1 signifikan
+
+
+# Analisis Sisaan
+
+## Ekplorasi Sisaan
+
+```{r}
+sisaan.da <- model1.da$residuals
+
+par(mfrow = c(2,2),    
+    mar = c(4,4,2,1),  
+    oma = c(0,0,2,0))  
+
+# Q-Q Plot
+qqnorm(sisaan.da, main = "Normal Q-Q Plot")
+qqline(sisaan.da, col = "blue", lwd = 2)
+
+# Plot Sisaan vs Waktu
+plot(sisaan.da, type = "p",
+     main = "Plot Sisaan vs Waktu",
+     xlab = "Waktu", ylab = "Sisaan")
+
+# ACF
+acf(sisaan.da, main = "ACF Sisaan")
+
+# PACF
+pacf(sisaan.da, main = "PACF Sisaan")
+```
+
+Berdasarkan plot kuantil-kuantil normal, secara eksploratif terlihat bahwa sisaan menyebar normal karena titik-titik cenderung menyebar pada garis. Selain itu, lebar pita sebaran sisaan tampak seragam, yang mengindikasikan ragam homogen. Sementara itu, plot ACF dan PACF sisaan dari model MA(1) menunjukkan adanya spike signifikan pada lag ke 8, secara visual sisaan dapat terindikasi tidak saling bebas. Kondisi ini akan diuji lebih lanjut dengan uji formal.
+
+## Uji Formal
+
+```{r}
+shapiro.test(sisaan.da)
+```
+
+$H_0$: Sisaan menyebar normal
+$H_1$: Sisaan tidak menyebar normal
+
+Berdasarkan uji KS tersebut, didapat p-value sebesar 0.1602 > 0.05 = $\alpha$ sehingga gagal menolak $H_0$
+dan menandakan bahwa sisaan menyebar normal. Hal ini sesuai dengan hasil eksplorasi menggunakan plot kuantil-kuantil normal.
+
+```{r}
+Box.test(sisaan.da, type = "Ljung")
+```
+
+$H_0$: Sisaan saling bebas
+$H_1$: Sisaan tidak saling bebas
+
+Berdasarkan uji Ljung-Box tersebut, didapat p-value sebesar 0.5298 > 0.05 = $\alpha$ sehingga gagal tolak $H_0$ dan menandakan bahwa sisaan saling bebas. Hal ini berbeda dengan eksplorasi.
+
+```{r}
+Box.test((sisaan.da)^2, type = "Ljung")
+```
+
+$H_0$: Ragam sisaan homogen
+$H_1$: Ragam sisaan tidak homogen
+
+Berdasarkan uji Ljung-Box terhadap sisaan kuadrat tersebut, didapat p-value sebesar 0.1949 > 0.05 = $\alpha$ sehingga gagal tolak $H_0$ dan menandakan bahwa ragam sisaan homogen.
+
+```{r}
+t.test(sisaan.da, mu = 0, conf.level = 0.95)
+```
+
+$H_0$: Nilai tengah sisaan sama dengan 0
+$H_1$: Nilai tengah sisaan tidak sama dengan 0
+
+Berdasarkan uji-t, didapat p-value sebesar 0.9416 > 0.05 = $\alpha$sehingga gagal tolak $H_0$ dan menandakan bahwa nilai tengah sisaan sama dengan nol.
+
+# Akurasi Model
+
+Akurasi dilakukan dengan forecast data test dan dibandingkan dengan data test.
+Metriks yang digunakan adalah *Mean Absolute Percentage Error* (MAPE)
+
+```{r}
+ramalan.da <- forecast(model1.da, h = length(ts.dt.test))
+```
+
+```{r}
+dt.ramalan.da <- ramalan.da$mean
+plot(ramalan.da)
+```
+
+
+```{r}
+pt_akhir_train <- tail(ts.dt.test, 1) 
+
+forecast <- diffinv(dt.ramalan.da, differences = 1, xi = pt_akhir_train)
+hasil <- forecast[-1]
+hasil <- forecast[1:length(ts.dt.test)]
+
+# Bandingkan aktual vs forecast
+perbandingan.da <- cbind(
+  Aktual   = ts.dt.test,
+  Forecast = hasil
+)
+
+print(head(perbandingan.da, 10))  
+```
+
+```{r}
+
+```
+
+
+```{r}
+akurasi_test <- accuracy(hasil, ts.dt.test)
+akurasi_test
+```
+
+Didapatkan hasil MAPE sebesar 8.43%, akurasi yang didapatkan cukup moderat dan bisa digunakan untuk forecast 30 hari ke depan.
+
+
+```{r}
+ts.plot(ts.dt, col = "black", lty = 1,
+        xlab = "Waktu", ylab = "Price")
+
+# Garis forecast
+lines((length(ts.dt.train)+1):length(ts.dt), hasil, col = "blue", lty = 2, lwd = 2)
+legend("topleft", 
+       legend = c("Data Aktual", "Forecast"),
+       col = c("black", "blue"),
+       lty = c(1,2,3), lwd = c(1,2,1), bty = "n")
+```
+
+
+# Forecast
+
+```{r}
+ramalan.da2 <- forecast(model1.da, h = (length(ts.dt.test) + 30))
+```
+
+```{r}
+ramalan.da2
+```
+
+
+```{r}
+dt.ramalan.da2 <- ramalan.da2$mean
+plot(ramalan.da2)
+```
+
+```{r}
+pt_akhir <- tail(ts.dt.test+30, 1) 
+
+forecast <- diffinv(dt.ramalan.da2, differences = 1, xi = pt_akhir_train)
+hasil2 <- forecast[-1]
+hasil2 <- forecast[1:(length(ts.dt.test)+30)]
+```
+
+```{r}
+ts.plot(ts.dt, col = "black", lty = 1,
+        xlab = "Waktu", ylab = "Price")
+
+# Garis forecast
+lines((length(ts.dt.train)+1):(length(ts.dt)+30), hasil2, col = "blue", lty = 2, lwd = 2)
+legend("topleft", 
+       legend = c("Data Aktual", "Forecast"),
+       col = c("black", "blue"),
+       lty = c(1,2,3), lwd = c(1,2,1), bty = "n")
+```
+
+```{r}
+hasil2[101:130]
+```
+
+Berikut hasil forecasting selama 30 hari ke depan.
+
+# Kesimpulan dan Rekomendasi
+ 
+>Berdasarkan hasil forecasting terlihat akan ada tren naik permintaan 'Flores Fajar Blend' pada 30 hari ke depan. Rekomendasi yang dapat disampaikan adalah meningkatkan produksi pada 'Flores Fajar Blend' setiap harinya secara perlahan dengan kenaikan produksi sekitar 0.2kg per hari.
+
+
+
+
+
+
