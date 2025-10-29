@@ -28,11 +28,6 @@ library(tidyverse)
 # Praproses Data
 
 ```{r}
-view(df)
-```
-
-
-```{r}
 df <- import("https://raw.githubusercontent.com/bryantddr/mpdw/refs/heads/main/Pertemuan%202/Bitcoin.csv")
 df <- df %>%
   mutate(
