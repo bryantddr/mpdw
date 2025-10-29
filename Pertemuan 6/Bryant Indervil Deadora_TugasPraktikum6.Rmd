@@ -28,6 +28,11 @@ library(tidyverse)
 # Praproses Data
 
 ```{r}
+view(df)
+```
+
+
+```{r}
 df <- import("https://raw.githubusercontent.com/bryantddr/mpdw/refs/heads/main/Pertemuan%202/Bitcoin.csv")
 df <- df %>%
   mutate(
@@ -35,7 +40,7 @@ df <- df %>%
     Price = as.numeric(Price),
     Price = Price/1000)
 df <- df[379:504,2]
-df
+df <- df[1:100]
 ```
 
 ```{r}
@@ -87,7 +92,7 @@ Berdasarkan hasil uji ADF, *p-value* = 0.1131 \> 0.05 = $\alpha$, maka tak tolak
 ## Uji Box-Cox
 
 ```{r}
-index <- seq(1:126)
+index <- seq(1:length(df))
 
 # Uji Box-Cox
 bc <- boxcox(
@@ -153,8 +158,9 @@ Berdasarkan uji PP, *p-value* = 0.01 < 0.05 = $\alpha$, tolak H0. Data sudah sta
 
 ### Uji Box-Cox
 
+
 ```{r}
-index <- seq(1:125)
+index <- seq(1:(length(df)-1))
 
 # Uji Box-Cox
 bc <- boxcox(
@@ -229,7 +235,7 @@ lambda
 
 
 ```{r}
-index <- seq(1:125)
+index <- seq(1:(length(df)-1))
 
 # Uji Box-Cox
 bc <- boxcox(
